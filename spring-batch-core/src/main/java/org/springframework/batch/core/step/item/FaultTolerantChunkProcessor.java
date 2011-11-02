@@ -193,7 +193,7 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 	}
 
 	@Override
-	protected Chunk<O> transform(final StepContribution contribution, Chunk<I> inputs) throws Exception {
+	protected Chunk<O> transform(final StepContribution contribution, final Chunk<I> inputs) throws Exception {
 
 		Chunk<O> outputs = new Chunk<O>();
 		@SuppressWarnings("unchecked")
@@ -204,7 +204,7 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 
 		for (final Chunk<I>.ChunkIterator iterator = inputs.iterator(); iterator.hasNext();) {
 
-			final int scanLimit = processorTransactional ? inputs.size():0 ;//3;//processorTransactional ? 1 : 0;
+			final int scanLimit = processorTransactional ? 1 : 0;
 			final I item = iterator.next();
 
 			RetryCallback<O> retryCallback = new RetryCallback<O>() {
@@ -214,14 +214,7 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 					try {
 						count.incrementAndGet();
 						O cached = (cacheIterator != null && cacheIterator.hasNext()) ? cacheIterator.next() : null;
-						
-//						if (!processorTransactional && !context.isExhaustedOnly() && context.getRetryCount()>0) {
-//							output = doProcess(item);
-//						}
-						if (cached != null && count.get() > scanLimit) {
-							
-							/* Scan limit makes sure that we do not re-process non-transactional processors*/
-							
+						if (inputs.isBusy() && cached != null && count.get() > scanLimit) {
 							/*
 							 * If there is a cached chunk then we must be
 							 * scanning for errors in the writer, in which case
@@ -232,8 +225,6 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 							output = cached;
 						}
 						else {
-							System.out.println("skips "+cache.getSkips());
-							System.out.println("Item "+ item+ "skipped: "+containsItem(cache.getSkips(), item));
 							output = doProcess(item);
 							if (!processorTransactional) {
 								cache.add(output);
@@ -270,12 +261,6 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 						data.incrementFilterCount();
 					}
 					return output;
-				}
-
-				private boolean containsItem(List<SkipWrapper<O>> skips, I item) {
-					for (SkipWrapper skipWrapper : skips) {
-						if(skipWrapper.getItem().equals(item))return true;
-					}return false;
 				}
 
 			};
@@ -535,7 +520,6 @@ public class FaultTolerantChunkProcessor<I, O> extends SimpleChunkProcessor<I, O
 		List<O> items = Collections.singletonList(outputIterator.next());
 		inputIterator.next();
 		try {
-			doProcess(items.get(0));
 			writeItems(items);
 			// If successful we are going to return and allow
 			// the driver to commit...
