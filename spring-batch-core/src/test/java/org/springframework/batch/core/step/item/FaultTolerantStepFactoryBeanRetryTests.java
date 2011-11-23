@@ -16,7 +16,6 @@
 package org.springframework.batch.core.step.item;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -32,6 +31,7 @@ import org.apache.commons.logging.LogFactory;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
@@ -125,55 +125,11 @@ public class FaultTolerantStepFactoryBeanRetryTests {
 		assertTrue(factory.getObject() instanceof Step);
 	}
 
-	@Test
-	public void testProcessAllItemsWhenErrorInWriter_transformation() throws Exception {
-		FaultTolerantStepFactoryBean<String, Integer> factory = new FaultTolerantStepFactoryBean<String, Integer>();
-		factory.setBeanName("step");
-
-		factory.setItemReader(new ListItemReader<String>(new ArrayList<String>()));
-		factory.setJobRepository(repository);
-		factory.setTransactionManager(new ResourcelessTransactionManager());
-		factory.setRetryableExceptionClasses(getExceptionMap(Exception.class));
-		ItemWriter<Integer> failingWriter = new ItemWriter<Integer>() {
-			public void write(List<? extends Integer> data) throws Exception {
-				int count = 0;
-				for (Integer item : data) {
-					if (count++ == 2) {
-						throw new Exception("Planned failure in writer");
-					}
-					written.add(item);
-				}
-			}
-		};
-
-		ItemProcessor<String, Integer> processor = new ItemProcessor<String, Integer>() {
-			public Integer process(String item) throws Exception {
-				processed.add(item);
-				return Integer.parseInt(item);
-			}
-		};
-		ItemReader<String> reader = new ListItemReader<String>(Arrays.asList("1", "2", "3"));
-		factory.setCommitInterval(3);
-		factory.setRetryLimit(3);
-		factory.setSkippableExceptionClasses(new HashMap<Class<? extends Throwable>, Boolean>());
-		factory.setItemReader(reader);
-		factory.setItemProcessor(processor);
-		factory.setItemWriter(failingWriter);
-		Step step = (Step) factory.getObject();
-
-		StepExecution stepExecution = new StepExecution(step.getName(), jobExecution);
-		repository.add(stepExecution);
-		step.execute(stepExecution);
-		System.out.println(stepExecution.getWriteCount());
-		System.out.println(processed.size());
-		System.out.println(processed);
-		System.out.println(written);
-		assertEquals((1 + 3) * 3, processed.size()); // (Initial try + retry
-														// limit)*item count
-	}
 
 	@Test
 	public void testProcessAllItemsWhenErrorInWriter() throws Exception {
+		final int RETRY_LIMIT = 3;
+		final List<String> ITEM_LIST = Arrays.asList("a", " b", "c");
 		ItemWriter<String> failingWriter = new ItemWriter<String>() {
 			public void write(List<? extends String> data) throws Exception {
 				for (String item : data) {
@@ -191,9 +147,9 @@ public class FaultTolerantStepFactoryBeanRetryTests {
 				return item;
 			}
 		};
-		ItemReader<String> reader = new ListItemReader<String>(Arrays.asList("a", "b", "c"));
+		ItemReader<String> reader = new ListItemReader<String>(ITEM_LIST);
 		factory.setCommitInterval(3);
-		factory.setRetryLimit(3);
+		factory.setRetryLimit(RETRY_LIMIT);
 		factory.setSkipLimit(1);
 		factory.setSkippableExceptionClasses(getExceptionMap(Exception.class));
 		factory.setItemReader(reader);
@@ -204,12 +160,9 @@ public class FaultTolerantStepFactoryBeanRetryTests {
 		StepExecution stepExecution = new StepExecution(step.getName(), jobExecution);
 		repository.add(stepExecution);
 		step.execute(stepExecution);
-		System.out.println(stepExecution.getWriteCount());
-		System.out.println(processed.size());
 		System.out.println(processed);
-		System.out.println(written);
-		assertEquals((1 + 3) * 3, processed.size()); // (Initial try + retry
-														// limit)*item count
+		assertEquals(ExitStatus.COMPLETED.getExitCode(), stepExecution.getExitStatus().getExitCode());
+		assertEquals((1 + RETRY_LIMIT) * ITEM_LIST.size(), processed.size());
 	}
 
 	@Test
